@@ -1,0 +1,45 @@
+================================================================================
+  GitHub SSH 公钥配置说明
+================================================================================
+
+【步骤 1】打开 GitHub SSH Keys 设置页面
+   网址：https://github.com/settings/keys
+
+【步骤 2】点击 "New SSH key" 按钮
+
+【步骤 3】填写以下信息：
+
+   Title（密钥名称）：Windows PC
+   Key（公钥内容）：复制下面的完整内容（包括 ssh-rsa 开头到结尾）
+
+
+────────────────────────────────────────────────────────────────────────────
+  SSH 公钥内容（请复制整行，包括开头和结尾）
+────────────────────────────────────────────────────────────────────────────
+
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDUxmMGQ0eqEiTkG/eAX8t8YcPibUZDC2vDJU3NJmQlPX8GWcmjdJvt/OmOB/DVlP4HZGRQqTPUeGJBNG/9LgDEmr9juAZ7cyKmJM24LKoNbr/FhSU+CiQOD9WacjDKfBdiawNHeMI/SzBFJ5Qres4hd/REy2keKIV5fyOspB6XD1RZovrUWzxHDQUDMnd00O+vJceIqP0+XpN9wvfoxBc2iwB20JDcUWDWv27vo7C5tK101c/JZXgbIgwcIlcBlXMv9jRicV9vFRe0ijJg4cYq1piXwW4vTNqahoWTRz6b7eovdhU/9q9IrqwwuRa2pD/626RH/fibW5nwdaeBhxEZFLp8JB2ndYCkI58qYZXTYglhro6HRFS26BrIzEJL6Vzp9B9OYCWpkbJCvtDSSvZ578VvP1zetfbRspJWgpSXtyt3uoSve6HNxJ/BVFOAabTHNkHkFUpjyGpfOcefarpIW3pCOiL0o7XJn5k8eVaYudoM7PMsTK9UMBjg7T3dMyc= 11245@Amlia
+
+────────────────────────────────────────────────────────────────────────────
+
+【步骤 4】点击 "Add SSH key" 按钮完成添加
+
+【步骤 5】测试 SSH 连接（可选）
+   在 Git Bash 中执行：
+   ssh -T git@github.com
+
+   成功会显示：
+   Hi LinkHellc! You've successfully authenticated...
+
+
+================================================================================
+  当前 Git 配置信息
+================================================================================
+
+仓库地址：https://github.com/LinkHellc/MBD_CICDKits
+当前远程：origin -> git@github.com:LinkHellc/MBD_CICDKits.git (SSH)
+
+添加 SSH 公钥后，可以免密推送代码：
+   git push -u origin main
+
+
+================================================================================

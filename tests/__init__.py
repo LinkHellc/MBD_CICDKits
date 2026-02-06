@@ -1,1 +1,1 @@
-"""Tests for MBD_CICDKits."""
+"""Test suite for MBD_CICDKits."""

@@ -33,22 +33,22 @@
 # - SM typically creates next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
-generated: 2026-02-04
+generated: 2026-02-06
 project: 181_CICDRedo
 project_key: NOKEY
 tracking_system: file-system
 story_location: {project-root}/_bmad-output/implementation-artifacts
 
 development_status:
-  # Epic 1: 项目配置管理
-  epic-1: in-progress
+  # Epic 1: 项目配置管理 ✅ DONE
+  epic-1: done
   1-1-create-new-project-config: done
-  1-2-save-project-config-locally: backlog
-  1-3-load-saved-project-config: backlog
-  1-4-edit-existing-project-config: backlog
-  1-5-delete-project-config: backlog
-  1-6-auto-detect-matlab-iar-installation-paths: backlog
-  epic-1-retrospective: optional
+  1-2-save-project-config-locally: done
+  1-3-load-saved-project-config: done
+  1-4-edit-existing-project-config: done
+  1-5-delete-project-config: done
+  1-6-auto-detect-matlab-iar-installation-paths: done
+  epic-1-retrospective: done
 
   # Epic 2: 工作流执行
   epic-2: backlog

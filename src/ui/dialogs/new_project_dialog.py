@@ -5,7 +5,6 @@ following Architecture Decision 3.1 (PyQt6 UI Patterns).
 """
 
 import logging
-import re
 from pathlib import Path
 from PyQt6.QtWidgets import (
     QDialog,
@@ -20,26 +19,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 
 from core.models import ProjectConfig
-from core.config import save_config, CONFIG_DIR
+from core.config import save_config, config_exists, update_config
+from utils.path_utils import sanitize_filename
+from utils.path_detector import auto_detect_paths
 
 logger = logging.getLogger(__name__)
-
-
-def sanitize_filename(name: str) -> str:
-    """清理文件名中的非法字符
-
-    Args:
-        name: 原始文件名
-
-    Returns:
-        清理后的文件名
-    """
-    # 移除Windows文件名中的非法字符
-    cleaned = re.sub(r'[<>:"/\\|?*]', '_', name)
-    # 移除前后空格
-    cleaned = cleaned.strip()
-    # 限制长度
-    return cleaned[:50] if cleaned else "project"
 
 
 class NewProjectDialog(QDialog):
@@ -55,10 +39,22 @@ class NewProjectDialog(QDialog):
 
     # 定义信号：配置保存成功时发射
     config_saved = pyqtSignal(str)  # 参数：配置文件名
+    config_updated = pyqtSignal(str)  # 参数：配置文件名（编辑模式）
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, edit_mode: bool = False):
+        """初始化对话框
+
+        Args:
+            parent: 父窗口
+            edit_mode: 是否为编辑模式（默认 False）
+        """
         super().__init__(parent)
-        self.setWindowTitle("新建项目配置")
+        self._edit_mode = edit_mode
+        self._original_project_name = ""  # 编辑模式时保存原始项目名
+
+        # 根据模式设置标题
+        title = "编辑项目配置" if edit_mode else "新建项目配置"
+        self.setWindowTitle(title)
         self.setMinimumWidth(600)
 
         # 初始化 UI
@@ -67,6 +63,20 @@ class NewProjectDialog(QDialog):
     def _init_ui(self):
         """初始化 UI 组件"""
         layout = QVBoxLayout(self)
+
+        # 项目名称输入字段（Subtask 1.1）
+        name_row = QHBoxLayout()
+        name_label = QLabel("项目名称:")
+        name_label.setMinimumWidth(150)
+        name_row.addWidget(name_label)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("输入项目名称（用于保存配置文件）")
+        # 编辑模式下项目名称只读（Subtask 1.4）
+        if self._edit_mode:
+            self.name_input.setReadOnly(True)
+        name_row.addWidget(self.name_input)
+        layout.addLayout(name_row)
 
         # 创建路径输入字段
         self.path_inputs: dict[str, QLineEdit] = {}
@@ -100,8 +110,30 @@ class NewProjectDialog(QDialog):
             )
             row.addWidget(browse_btn)
 
+            # 自动检测按钮（仅针对 MATLAB 和 IAR 路径）
+            if field_key in ("matlab_code_path", "iar_project_path"):
+                detect_key = "matlab" if field_key == "matlab_code_path" else "iar"
+                auto_detect_btn = QPushButton("🔍")
+                auto_detect_btn.setMaximumWidth(40)
+                auto_detect_btn.setToolTip(f"自动检测{label_text}")
+                auto_detect_btn.clicked.connect(
+                    lambda checked, key=detect_key, inp=input_field: self._auto_detect_single_path(
+                        key, inp
+                    )
+                )
+                row.addWidget(auto_detect_btn)
+
             layout.addLayout(row)
             self.path_inputs[field_key] = input_field
+
+        # 添加全局自动检测按钮
+        detect_all_row = QHBoxLayout()
+        detect_all_row.addStretch()
+        detect_all_btn = QPushButton("🔍 自动检测所有路径")
+        detect_all_btn.setToolTip("自动扫描并填充 MATLAB 和 IAR 路径")
+        detect_all_btn.clicked.connect(self._auto_detect_all_paths)
+        detect_all_row.addWidget(detect_all_btn)
+        layout.addLayout(detect_all_row)
 
         # 按钮栏
         button_layout = QHBoxLayout()
@@ -139,6 +171,20 @@ class NewProjectDialog(QDialog):
             if folder:
                 input_field.setText(folder)
 
+    def set_config(self, config: ProjectConfig):
+        """加载现有配置到 UI 字段（编辑模式）
+
+        Args:
+            config: 要加载的配置对象
+        """
+        self._original_project_name = config.name
+        self.name_input.setText(config.name)
+        self.path_inputs["simulink_path"].setText(config.simulink_path)
+        self.path_inputs["matlab_code_path"].setText(config.matlab_code_path)
+        self.path_inputs["a2l_path"].setText(config.a2l_path)
+        self.path_inputs["target_path"].setText(config.target_path)
+        self.path_inputs["iar_project_path"].setText(config.iar_project_path)
+
     def _validate_paths(self) -> list[str]:
         """验证所有路径已填写且存在
 
@@ -168,31 +214,40 @@ class NewProjectDialog(QDialog):
         return errors
 
     def _save_config(self):
-        """保存配置"""
+        """保存配置（增强版：包含覆盖检测和文件名清理）
+
+        项目名称获取逻辑：
+        1. 优先使用用户手动输入的项目名称
+        2. 如果用户未输入，自动从 Simulink 工程路径提取目录名作为项目名称
+        3. 清理文件名中的非法字符（使用 sanitize_filename）
+        """
         # 验证路径
         errors = self._validate_paths()
         if errors:
             QMessageBox.warning(self, "验证失败", "\n".join(errors))
             return
 
-        # 从路径中提取项目名
-        simulink_path = self.path_inputs["simulink_path"].text()
-        project_name = Path(simulink_path).name
+        # 获取项目名称
+        if self._edit_mode:
+            # 编辑模式：使用原始项目名称
+            filename = self._original_project_name
+        else:
+            # 新建模式：获取并清理项目名称
+            raw_name = self.name_input.text().strip()
+            if not raw_name:
+                # 如果用户没有输入项目名称，从 Simulink 路径自动提取
+                simulink_path = self.path_inputs["simulink_path"].text()
+                raw_name = Path(simulink_path).name
 
-        # 清理文件名
-        filename = sanitize_filename(project_name)
-        config_file = CONFIG_DIR / f"{filename}.toml"
+            # 清理文件名（使用 sanitize_filename）
+            filename = sanitize_filename(raw_name)
 
-        # 检查是否已存在同名配置
-        if config_file.exists():
-            reply = QMessageBox.question(
-                self,
-                "配置已存在",
-                f"配置 '{filename}' 已存在，是否覆盖？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
+            if not filename or filename == "unnamed_project":
+                QMessageBox.warning(
+                    self,
+                    "无效的项目名称",
+                    "项目名称不能为空或仅包含非法字符。"
+                )
                 return
 
         # 创建配置对象
@@ -206,11 +261,132 @@ class NewProjectDialog(QDialog):
         )
 
         # 保存配置
-        if save_config(config, filename):
-            logger.info(f"配置已保存: {filename}")
-            self.config_saved.emit(filename)
-            self.accept()
-        else:
+        try:
+            if self._edit_mode:
+                # 编辑模式：调用 update_config
+                if update_config(filename, config):
+                    QMessageBox.information(
+                        self,
+                        "更新成功",
+                        f"配置已更新: {filename}"
+                    )
+                    logger.info(f"配置已更新: {filename}")
+                    self.config_updated.emit(filename)
+                    self.accept()
+                else:
+                    QMessageBox.critical(
+                        self,
+                        "更新失败",
+                        "配置更新失败，请查看日志。"
+                    )
+            else:
+                # 新建模式：检查配置是否已存在（AC #5）
+                if config_exists(filename):
+                    reply = QMessageBox.question(
+                        self,
+                        "配置已存在",
+                        f"配置文件 '{filename}' 已存在。\n是否覆盖？",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No
+                    )
+                    if reply == QMessageBox.StandardButton.No:
+                        return  # 用户选择不覆盖
+
+                if save_config(config, filename, overwrite=True):
+                    QMessageBox.information(
+                        self,
+                        "保存成功",
+                        f"配置已保存: {filename}"
+                    )
+                    logger.info(f"配置已保存: {filename}")
+                    self.config_saved.emit(filename)
+                    self.accept()
+                else:
+                    QMessageBox.critical(
+                        self,
+                        "保存失败",
+                        "配置保存失败，请查看日志。"
+                    )
+
+        except Exception as e:
             QMessageBox.critical(
-                self, "保存失败", "配置保存失败，请查看日志。"
+                self,
+                "更新失败" if self._edit_mode else "保存失败",
+                f"配置{'更新' if self._edit_mode else '保存'}失败:\n{str(e)}"
+            )
+
+    def _auto_detect_single_path(self, detect_key: str, input_field: QLineEdit):
+        """检测单个路径
+
+        Args:
+            detect_key: 检测类型 ("matlab" 或 "iar")
+            input_field: 要填充的输入框控件
+        """
+        from utils.path_detector import detect_matlab_installations, detect_iar_installations
+
+        detected_path = None
+        if detect_key == "matlab":
+            detected_path = detect_matlab_installations()
+        elif detect_key == "iar":
+            detected_path = detect_iar_installations()
+
+        if detected_path:
+            input_field.setText(str(detected_path))
+            # 标注为自动检测（绿色背景和边框）
+            input_field.setStyleSheet(
+                "background-color: #e8f5e9; "
+                "border: 2px solid #4CAF50; "
+                "padding: 2px;"
+            )
+            input_field.setToolTip("自动检测的路径")
+            logger.info(f"自动检测到 {detect_key} 路径: {detected_path}")
+        else:
+            QMessageBox.information(
+                self,
+                "未检测到安装",
+                f"未能自动检测到 {'MATLAB' if detect_key == 'matlab' else 'IAR'} 安装。\n\n"
+                f"请手动指定路径。"
+            )
+
+    def _auto_detect_all_paths(self):
+        """检测所有路径（MATLAB 和 IAR）"""
+        results = auto_detect_paths()
+
+        detected_count = 0
+        if results["matlab"]:
+            self.path_inputs["matlab_code_path"].setText(str(results["matlab"]))
+            # 添加视觉标注
+            self.path_inputs["matlab_code_path"].setStyleSheet(
+                "background-color: #e8f5e9; "
+                "border: 2px solid #4CAF50; "
+                "padding: 2px;"
+            )
+            self.path_inputs["matlab_code_path"].setToolTip("自动检测的路径")
+            detected_count += 1
+
+        if results["iar"]:
+            self.path_inputs["iar_project_path"].setText(str(results["iar"]))
+            # 添加视觉标注
+            self.path_inputs["iar_project_path"].setStyleSheet(
+                "background-color: #e8f5e9; "
+                "border: 2px solid #4CAF50; "
+                "padding: 2px;"
+            )
+            self.path_inputs["iar_project_path"].setToolTip("自动检测的路径")
+            detected_count += 1
+
+        if detected_count > 0:
+            QMessageBox.information(
+                self,
+                "检测完成",
+                f"成功检测到 {detected_count} 个工具路径。\n\n"
+                f"检测到的路径已用绿色边框标注。"
+            )
+            logger.info(f"自动检测完成，检测到 {detected_count} 个工具路径")
+        else:
+            QMessageBox.information(
+                self,
+                "未检测到安装",
+                "未能自动检测到任何工具安装。\n\n"
+                "请手动指定所有路径。"
             )

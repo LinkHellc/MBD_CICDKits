@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true,
+    "requirements-driven-development@claude-code-dev-workflows": true,
+    "code-review@claude-plugins-official": true,
+    "context7@claude-plugins-official": true
+  }
+}

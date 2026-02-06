@@ -39,12 +39,12 @@ class ProjectConfig:
     modified_at: str = ""
 
     def to_dict(self) -> dict:
-        """转换为字典（排除 None 值）
+        """转换为字典（排除 None 值和空字符串）
 
         Returns:
             配置字典
         """
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+        return {k: v for k, v in self.__dict__.items() if v is not None and v != ""}
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProjectConfig":
@@ -68,15 +68,16 @@ class ProjectConfig:
             错误列表，空列表表示验证通过
         """
         errors = []
-        required_fields = {
-            "simulink_path": "Simulink 工程路径",
-            "matlab_code_path": "MATLAB 代码路径",
-            "a2l_path": "A2L 文件路径",
-            "target_path": "目标文件路径",
-            "iar_project_path": "IAR 工程路径",
-        }
+        required_fields = [
+            ("name", "项目名称"),
+            ("simulink_path", "Simulink 工程路径"),
+            ("matlab_code_path", "MATLAB 代码路径"),
+            ("a2l_path", "A2L 文件路径"),
+            ("target_path", "目标文件路径"),
+            ("iar_project_path", "IAR 工程路径"),
+        ]
 
-        for field_key, field_name in required_fields.items():
+        for field_key, field_name in required_fields:
             value = getattr(self, field_key, "")
             if not value or not value.strip():
                 errors.append(f"{field_name} 不能为空")
