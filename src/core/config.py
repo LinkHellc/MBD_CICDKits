@@ -362,7 +362,7 @@ def load_workflow_templates() -> list[WorkflowConfig]:
         if not isinstance(data["templates"], list):
             raise ConfigLoadError(
                 "'templates' 字段应为列表",
-                suggestions["确保 'templates' 是一个列表"]
+                suggestions=["确保 'templates' 是一个列表"]
             )
 
         # 转换为 WorkflowConfig 对象列表
@@ -420,7 +420,6 @@ def save_selected_workflow(project_name: str, workflow: WorkflowConfig) -> bool:
         config.custom_params["workflow_config"] = workflow.to_dict()
 
         # 更新时间戳
-        from datetime import datetime
         config.modified_at = datetime.now().isoformat()
 
         # 保存更新（覆盖模式）
