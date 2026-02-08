@@ -6,7 +6,23 @@ following Architecture Decision 1.2 (Lightweight Data Containers).
 
 from dataclasses import dataclass, field
 from dataclasses import fields
-from typing import Optional
+from typing import Optional, List
+from enum import Enum
+
+
+class ValidationSeverity(Enum):
+    """验证严重级别
+
+    用于分类验证错误的严重程度。
+
+    Attributes:
+        ERROR: 阻止执行
+        WARNING: 警告，可执行
+        INFO: 信息，可执行
+    """
+    ERROR = "error"
+    WARNING = "warning"
+    INFO = "info"
 
 
 @dataclass
@@ -65,7 +81,7 @@ class ProjectConfig:
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
         return cls(**filtered_data)
 
-    def validate_required_fields(self) -> list[str]:
+    def validate_required_fields(self) -> List[str]:
         """验证必需字段是否已填写
 
         Returns:
@@ -147,7 +163,7 @@ class WorkflowConfig:
     name: str = ""                    # 工作流名称
     description: str = ""             # 工作流描述
     estimated_time: int = 0           # 预计执行时间（分钟）
-    stages: list[StageConfig] = field(default_factory=list)  # 阶段列表
+    stages: List[StageConfig] = field(default_factory=list)  # 阶段列表
 
     def to_dict(self) -> dict:
         """转换为字典（包括嵌套的 stages）
@@ -184,3 +200,142 @@ class WorkflowConfig:
             ]
 
         return cls(**filtered_data)
+
+
+@dataclass
+class ValidationError:
+    """验证错误
+
+    表示配置验证过程中发现的单个错误。
+
+    Architecture Decision 1.2:
+    - 所有字段提供默认值
+    - 支持序列化/反序列化
+
+    Attributes:
+        field: 错误字段名
+        message: 错误消息
+        severity: 严重级别
+        suggestions: 修复建议列表
+        stage: 相关阶段（可选）
+    """
+    field: str = ""
+    message: str = ""
+    severity: ValidationSeverity = ValidationSeverity.ERROR
+    suggestions: list = field(default_factory=list)
+    stage: str = ""
+
+    def to_dict(self) -> dict:
+        """转换为字典
+
+        Returns:
+            验证错误字典
+        """
+        return {
+            "field": self.field,
+            "message": self.message,
+            "severity": self.severity.value,
+            "suggestions": self.suggestions,
+            "stage": self.stage
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ValidationError":
+        """从字典创建验证错误对象
+
+        Args:
+            data: 验证错误字典
+
+        Returns:
+            ValidationError 实例
+        """
+        valid_fields = {f.name for f in fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+
+        # 处理 severity 字符串到枚举的转换
+        if "severity" in filtered_data and isinstance(filtered_data["severity"], str):
+            filtered_data["severity"] = ValidationSeverity(filtered_data["severity"])
+
+        return cls(**filtered_data)
+
+
+@dataclass
+class ValidationResult:
+    """验证结果
+
+    表示配置验证的完整结果。
+
+    Architecture Decision 1.2:
+    - 所有字段提供默认值
+    - 支持序列化/反序列化
+    - 使用 field(default_factory=...) 避免可变默认值陷阱
+
+    Attributes:
+        is_valid: 是否通过验证
+        errors: 错误列表
+        warning_count: 警告数量
+        error_count: 错误数量
+    """
+    is_valid: bool = True
+    errors: List[ValidationError] = field(default_factory=list)
+    warning_count: int = 0
+    error_count: int = 0
+
+    def to_dict(self) -> dict:
+        """转换为字典
+
+        Returns:
+            验证结果字典
+        """
+        return {
+            "is_valid": self.is_valid,
+            "errors": [error.to_dict() for error in self.errors],
+            "warning_count": self.warning_count,
+            "error_count": self.error_count
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ValidationResult":
+        """从字典创建验证结果对象
+
+        Args:
+            data: 验证结果字典
+
+        Returns:
+            ValidationResult 实例
+        """
+        valid_fields = {f.name for f in fields(cls)}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+
+        # 处理嵌套的 errors
+        if "errors" in filtered_data and isinstance(filtered_data["errors"], list):
+            filtered_data["errors"] = [
+                ValidationError.from_dict(error_data) if isinstance(error_data, dict) else error_data
+                for error_data in filtered_data["errors"]
+            ]
+
+        return cls(**filtered_data)
+
+    def add_error(self, error: ValidationError) -> None:
+        """添加一个验证错误
+
+        Args:
+            error: 验证错误对象
+        """
+        self.errors.append(error)
+        if error.severity == ValidationSeverity.ERROR:
+            self.error_count += 1
+        elif error.severity == ValidationSeverity.WARNING:
+            self.warning_count += 1
+        self.is_valid = (self.error_count == 0)
+
+    def get_errors_by_severity(self, severity: ValidationSeverity) -> List[ValidationError]:
+        """按严重级别获取错误列表
+
+        Args:
+            severity: 严重级别
+
+        Returns:
+            指定严重级别的错误列表
+        """
+        return [e for e in self.errors if e.severity == severity]

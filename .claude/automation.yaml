@@ -1,0 +1,146 @@
+# BMAD开发自动化配置
+# 版本: 1.0.0
+# 日期: 2026-02-08
+
+## 1. 飞书通知配置
+
+feishu:
+  enabled: true
+  # 飞书webhook地址（需要配置）
+  webhook_url: "YOUR_FEISHU_WEBHOOK_URL"
+  
+  # 通知模板
+  templates:
+    story_completed: |
+      📢 **Story开发完成通知**
+      
+      项目: 181_CICDRedo
+      Story: {story_name}
+      状态: ✅ 已完成
+      
+      ## 开发内容
+      {development_summary}
+      
+      ## 修改文件
+      {changed_files}
+      
+      ## 测试结果
+      {test_results}
+    
+    epic_completed: |
+      🎉 **Epic开发完成通知**
+      
+      项目: 181_CICDRedo
+      Epic: {epic_name}
+      状态: ✅ 已完成
+      Story数: {story_count}
+      
+      ## 完成的Stories
+      {stories_list}
+
+## 2. GitHub自动推送配置
+
+github:
+  enabled: true
+  # GitHub配置
+  repo: "LinkHellc/181_CICDRedo"  # 项目仓库
+  branch: "main"
+  
+  # 推送策略
+  push_strategy:
+    # 每个Story完成后自动推送
+    on_story_complete: true
+    # 每个Epic完成后自动推送
+    on_epic_complete: true
+    # 每天定时推送（如果当天有提交）
+    daily_schedule: "22:00"  # 晚上10点
+  
+  # 提交信息模板
+  commit_templates:
+    story: "feat(story/{story_id}): {story_name}"
+    epic: "feat(epic/{epic_id}): {epic_name}"
+    docs: "docs: 更新文档 - {description}"
+
+## 3. SKILL更新配置
+
+skill:
+  enabled: true
+  # SKILL文件路径
+  skill_path: "C:\\Users\\11245\\AppData\\Roaming\\npm\\node_modules\\openclaw\\skills\\bmad-method\\SKILL.md"
+  
+  # GitHub仓库（用于推送SKILL更新）
+  repo: "LinkHellc/openclaw-bmad-method"
+  branch: "main"
+  
+  # 经验记录格式
+  experience_template: |
+    ## {date} - {story/epic}开发经验
+    
+    ### 完成的任务
+    {tasks_completed}
+    
+    ### 遇到的问题
+    {issues_encountered}
+    
+    ### 解决方案
+    {solutions}
+    
+    ### 技术决策
+    {technical_decisions}
+    
+    ### 最佳实践
+    - {best_practice_1}
+    - {best_practice_2}
+    - {best_practice_3}
+
+## 自动化触发器
+
+triggers:
+  # Story完成后的自动化
+  on_story_complete:
+    - send_feishu_notification
+    - push_to_github
+    - update_skill_experience
+  
+  # Epic完成后的自动化
+  on_epic_complete:
+    - send_feishu_notification
+    - push_to_github
+    - update_skill_experience
+    - create_epic_summary
+  
+  # 每日总结（可选）
+  daily_summary:
+    - check_daily_progress
+    - send_summary_if_needed
+
+## 使用说明
+
+### 飞书Webhook配置
+1. 访问飞书群设置
+2. 添加"机器人" → "自定义机器人"
+3. 选择"Webhook" → "添加Webhook"
+4. 复制Webhook URL到上面的webhook_url字段
+
+### GitHub Token配置
+确保GitHub token有推送权限：
+- repo (完整仓库访问权限)
+- workflow (如果使用GitHub Actions)
+
+### 测试自动化
+```bash
+# 测试飞书通知
+curl -X POST {webhook_url} -d '{"msg_type":"text","content":{"text":"测试消息"}}'
+
+# 测试GitHub推送
+cd {project_dir}
+git status
+```
+
+## 注意事项
+
+1. **敏感信息保护**：不要将webhook_url和token提交到版本控制
+2. **环境变量**：建议使用环境变量存储敏感配置
+3. **频率控制**：飞书API有频率限制，避免过于频繁的通知
+4. **失败重试**：建议实现失败重试机制
+5. **通知时机**：避免在深夜或工作高峰期发送通知

@@ -23,7 +23,7 @@ try:
 except ImportError:
     tomli_w = None
 
-from core.models import ProjectConfig, WorkflowConfig
+from core.models import ProjectConfig, WorkflowConfig, StageConfig
 from utils.errors import (
     ConfigSaveError,
     ConfigValidationError,
@@ -437,3 +437,175 @@ def save_selected_workflow(project_name: str, workflow: WorkflowConfig) -> bool:
     except Exception as e:
         logger.error(f"保存工作流配置失败: {e}")
         raise ConfigError(f"保存工作流配置失败: {str(e)}")
+
+
+def load_custom_workflow(file_path: Path) -> tuple[Optional[WorkflowConfig], Optional[str]]:
+    """加载并验证自定义工作流配置 (Story 2.2)
+
+    从用户指定的JSON文件加载自定义工作流配置，并进行验证。
+
+    Args:
+        file_path: 自定义工作流JSON文件路径
+
+    Returns:
+        (WorkflowConfig, error_message):
+            - WorkflowConfig: 加载成功时返回配置对象
+            - error_message: 加载失败时返回错误信息，成功时为None
+
+    Raises:
+        无：所有错误通过返回值传递，便于UI层处理
+    """
+    try:
+        # 检查文件是否存在
+        if not file_path.exists():
+            error_msg = f"文件不存在: {file_path}"
+            logger.error(error_msg)
+            return None, error_msg
+
+        # 加载JSON文件
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            error_msg = f"JSON格式错误: {e}"
+            logger.error(error_msg)
+            return None, error_msg
+        except UnicodeDecodeError:
+            error_msg = "文件编码错误，请使用UTF-8编码保存"
+            logger.error(error_msg)
+            return None, error_msg
+
+        # 验证必需字段
+        required_fields = ["name", "description", "stages"]
+        missing_fields = [field for field in required_fields if field not in data]
+
+        if missing_fields:
+            error_msg = f"缺少必需字段: {', '.join(missing_fields)}"
+            logger.error(error_msg)
+            return None, error_msg
+
+        # 验证stages字段
+        if not isinstance(data["stages"], list):
+            error_msg = "'stages' 字段必须是一个列表"
+            logger.error(error_msg)
+            return None, error_msg
+
+        if not data["stages"]:
+            error_msg = "stages 列表不能为空"
+            logger.error(error_msg)
+            return None, error_msg
+
+        # 验证每个stage的必需字段
+        stage_required_fields = ["id", "name", "enabled", "dependencies"]
+        for idx, stage in enumerate(data["stages"]):
+            stage_missing = [field for field in stage_required_fields if field not in stage]
+            if stage_missing:
+                error_msg = f"阶段 {idx} 缺少必需字段: {', '.join(stage_missing)}"
+                logger.error(error_msg)
+                return None, error_msg
+
+            # 验证dependencies字段类型
+            if not isinstance(stage["dependencies"], list):
+                error_msg = f"阶段 {stage.get('id', idx)} 的 'dependencies' 字段必须是一个列表"
+                logger.error(error_msg)
+                return None, error_msg
+
+        # 检查循环依赖
+        stage_ids = [stage["id"] for stage in data["stages"]]
+        has_cycle = _check_circular_dependencies(data["stages"])
+        if has_cycle:
+            error_msg = "检测到循环依赖，请检查stages的dependencies配置"
+            logger.error(error_msg)
+            return None, error_msg
+
+        # 验证依赖的stage ID是否存在
+        for idx, stage in enumerate(data["stages"]):
+            for dep_id in stage["dependencies"]:
+                if dep_id not in stage_ids:
+                    error_msg = f"阶段 {stage.get('id', idx)} 的依赖 '{dep_id}' 不存在"
+                    logger.error(error_msg)
+                    return None, error_msg
+
+        # 检查至少有一个启用的stage
+        enabled_stages = [stage for stage in data["stages"] if stage.get("enabled", False)]
+        if not enabled_stages:
+            error_msg = "至少需要启用一个阶段"
+            logger.error(error_msg)
+            return None, error_msg
+
+        # 转换为WorkflowConfig对象
+        # 将自定义工作流的stages转换为StageConfig对象
+        workflow = WorkflowConfig(
+            id=data.get("id", "custom"),  # 如果没有id，使用"custom"
+            name=data["name"],
+            description=data["description"],
+            estimated_time=data.get("estimated_time", 0),  # 可选字段
+            stages=[
+                StageConfig(
+                    name=stage["id"],  # 使用id作为name（内部标识）
+                    enabled=stage["enabled"],
+                    timeout=stage.get("timeout", 300)  # 默认超时300秒
+                )
+                for stage in data["stages"]
+            ]
+        )
+
+        logger.info(f"成功加载自定义工作流: {workflow.name}")
+        return workflow, None
+
+    except Exception as e:
+        error_msg = f"加载自定义工作流时发生未知错误: {e}"
+        logger.exception(error_msg)
+        return None, error_msg
+
+
+def _check_circular_dependencies(stages: list[dict]) -> bool:
+    """检查工作流阶段是否存在循环依赖
+
+    使用深度优先搜索（DFS）检测循环。
+
+    Args:
+        stages: 工作流阶段列表，每个阶段包含id和dependencies
+
+    Returns:
+        bool: 如果存在循环依赖返回True，否则返回False
+    """
+    # 构建邻接表
+    graph = {stage["id"]: stage["dependencies"] for stage in stages}
+
+    # DFS检测循环
+    visited = set()
+    rec_stack = set()
+
+    def dfs(node: str) -> bool:
+        """DFS递归函数
+
+        Args:
+            node: 当前访问的节点ID
+
+        Returns:
+            bool: 如果发现循环返回True
+        """
+        if node in rec_stack:
+            return True  # 发现循环
+
+        if node in visited:
+            return False  # 已访问过，无循环
+
+        visited.add(node)
+        rec_stack.add(node)
+
+        # 递归访问所有依赖节点
+        for neighbor in graph.get(node, []):
+            if dfs(neighbor):
+                return True
+
+        rec_stack.remove(node)
+        return False
+
+    # 对所有节点执行DFS
+    for stage_id in graph.keys():
+        if dfs(stage_id):
+            return True
+
+    return False

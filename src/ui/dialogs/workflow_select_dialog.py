@@ -19,12 +19,14 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QWidget,
+    QFileDialog,
+    QMessageBox,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 
 from core.models import WorkflowConfig
-from core.config import load_workflow_templates
+from core.config import load_workflow_templates, load_custom_workflow
 from ui.styles.industrial_theme import FontManager
 
 logger = logging.getLogger(__name__)
@@ -160,6 +162,13 @@ class WorkflowSelectDialog(QDialog):
 
         button_layout.addStretch()
 
+        # Story 2.2: 添加加载自定义工作流按钮
+        custom_btn = QPushButton("📁 加载自定义工作流")
+        custom_btn.setMinimumHeight(44)
+        custom_btn.setMinimumWidth(160)
+        custom_btn.clicked.connect(self._load_custom_workflow)
+        button_layout.addWidget(custom_btn)
+
         cancel_btn = QPushButton("取消")
         cancel_btn.setMinimumHeight(44)
         cancel_btn.setMinimumWidth(120)
@@ -230,6 +239,84 @@ class WorkflowSelectDialog(QDialog):
             self.accept()
         else:
             logger.warning("未选择工作流模板")
+
+    def _load_custom_workflow(self):
+        """加载自定义工作流配置 (Story 2.2)
+
+        打开文件选择对话框，让用户选择自定义工作流JSON文件。
+        """
+        try:
+            # 打开文件选择对话框
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择自定义工作流配置文件",
+                str(Path.home()),
+                "JSON 文件 (*.json);;所有文件 (*.*)"
+            )
+
+            if not file_path:
+                logger.info("用户取消了自定义工作流加载")
+                return
+
+            # 加载并验证自定义工作流
+            logger.info(f"正在加载自定义工作流: {file_path}")
+            workflow, error_msg = load_custom_workflow(Path(file_path))
+
+            if error_msg:
+                # 显示错误消息
+                QMessageBox.critical(
+                    self,
+                    "加载失败",
+                    f"无法加载自定义工作流配置：\n\n{error_msg}",
+                    QMessageBox.StandardButton.Ok
+                )
+                logger.error(f"加载自定义工作流失败: {error_msg}")
+                return
+
+            # 加载成功，将自定义工作流添加到列表中
+            self._add_custom_workflow_to_list(workflow, Path(file_path).name)
+            logger.info(f"成功加载自定义工作流: {workflow.name}")
+
+        except Exception as e:
+            logger.exception(f"加载自定义工作流时发生异常: {e}")
+            QMessageBox.critical(
+                self,
+                "错误",
+                f"加载自定义工作流时发生未知错误：\n\n{str(e)}",
+                QMessageBox.StandardButton.Ok
+            )
+
+    def _add_custom_workflow_to_list(self, workflow: WorkflowConfig, filename: str):
+        """将自定义工作流添加到列表中 (Story 2.2)
+
+        Args:
+            workflow: 加载的工作流配置对象
+            filename: 源文件名
+        """
+        # 检查是否已存在同名工作流
+        for i in range(self.workflow_list.count()):
+            item = self.workflow_list.item(i)
+            existing_workflow: WorkflowConfig = item.data(Qt.ItemDataRole.UserRole)
+            if existing_workflow.id == workflow.id:
+                # 替换现有的工作流
+                self.workflow_list.takeItem(i)
+                logger.info(f"替换已存在的工作流: {workflow.id}")
+                break
+
+        # 创建新的列表项
+        item = QListWidgetItem()
+        display_text = f"{workflow.name} (自定义)"
+        display_text += f"\n⏱️ 预计时间: {workflow.estimated_time} 分钟" if workflow.estimated_time > 0 else ""
+        display_text += f"\n📁 {filename}"
+        item.setText(display_text)
+        item.setData(Qt.ItemDataRole.UserRole, workflow)
+
+        # 添加到列表顶部
+        self.workflow_list.insertItem(0, item)
+
+        # 自动选中
+        self.workflow_list.setCurrentItem(item)
+        self._on_workflow_selected(item)
 
     def get_selected_workflow(self) -> WorkflowConfig | None:
         """获取选中的工作流配置

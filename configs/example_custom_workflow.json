@@ -1,0 +1,42 @@
+{
+  "name": "自定义快速构建",
+  "description": "跳过A2L处理的快速构建工作流，适用于日常开发测试",
+  "estimated_time": 12,
+  "stages": [
+    {
+      "id": "matlab_code_gen",
+      "name": "MATLAB Code Generation",
+      "enabled": true,
+      "dependencies": [],
+      "timeout": 1800
+    },
+    {
+      "id": "file_processing",
+      "name": "File Processing",
+      "enabled": true,
+      "dependencies": ["matlab_code_gen"],
+      "timeout": 300
+    },
+    {
+      "id": "iar_compile",
+      "name": "IAR Compilation",
+      "enabled": true,
+      "dependencies": ["file_processing"],
+      "timeout": 1200
+    },
+    {
+      "id": "a2l_update",
+      "name": "A2L Update",
+      "enabled": false,
+      "dependencies": ["iar_compile"],
+      "timeout": 600
+    },
+    {
+      "id": "file_organize",
+      "name": "File Organization",
+      "enabled": true,
+      "dependencies": ["iar_compile"],
+      "timeout": 60
+    }
+  ]
+}
